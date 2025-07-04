@@ -1,10 +1,8 @@
-
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const app = express();
 const PORT = process.env.PORT || 3000;
-
 
 // Middleware
 app.use(express.json());
@@ -16,16 +14,28 @@ const posts = require('./posts/posts.js');
 // Store newsletter subscribers
 const subscribers = [];
 
-// Routes
+// Helper function to read and modify the main HTML template
+function getMainHTML(content, title = 'CodeNPixel - Game Dev & Graphics Programming') {
+    const htmlPath = path.join(__dirname, 'index.html');
+    let html = fs.readFileSync(htmlPath, 'utf8');
+    
+    // Update title if needed
+    if (title !== 'CodeNPixel - Game Dev & Graphics Programming') {
+        html = html.replace(/<title>.*?<\/title>/, `<title>${title}</title>`);
+    }
+    
+    // Replace the main content
+    html = html.replace(
+        /<div id="main-content">[\s\S]*?<\/div>\s*<!-- Footer -->/,
+        `<div id="main-content">${content}</div>\n\n    <!-- Footer -->`
+    );
+    
+    return html;
+}
 
-// Serve the main HTML file
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'index.html'));
-});
-
-// HTMX Routes
-app.get('/home', (req, res) => {
-    res.send(`
+// Helper function to generate home content
+function getHomeContent() {
+    return `
         <!-- Hero Section -->
         <section class="hero">
             <div class="container">
@@ -62,12 +72,11 @@ app.get('/home', (req, res) => {
                 </div>
             </div>
         </section>
-    `);
-});
+    `;
+}
 
-// Posts page
-app.get('/posts', (req, res) => {
-    const category = req.query.category || 'all';
+// Helper function to generate posts page content
+function getPostsContent(category = 'all') {
     const filteredPosts = category === 'all' 
         ? posts 
         : posts.filter(post => post.category.toLowerCase() === category.toLowerCase());
@@ -92,7 +101,7 @@ app.get('/posts', (req, res) => {
                 hx-push-url="/posts?category=${cat.toLowerCase()}">${cat}</button>
     `).join('');
 
-    res.send(`
+    return `
         <div class="posts-page">
             <div class="container">
                 <h1>All Posts</h1>
@@ -110,19 +119,18 @@ app.get('/posts', (req, res) => {
                 </div>
             </div>
         </div>
-    `);
-});
+    `;
+}
 
-// Individual post page
-app.get('/post/:id', (req, res) => {
-    const postId = parseInt(req.params.id);
+// Helper function to generate individual post content
+function getPostContent(postId) {
     const post = posts.find(p => p.id === postId);
     
     if (!post) {
-        return res.status(404).send('<h1>Post not found</h1>');
+        return null;
     }
 
-    res.send(`
+    return `
         <div class="post-page">
             <div class="container">
                 <a class="back-to-posts" hx-get="/posts" hx-target="#main-content" hx-push-url="/posts">← Back to Posts</a>
@@ -140,7 +148,60 @@ app.get('/post/:id', (req, res) => {
                 </div>
             </div>
         </div>
-    `);
+    `;
+}
+
+// Routes
+
+// Serve the main HTML file (home page)
+app.get('/', (req, res) => {
+    // Check if this is an HTMX request
+    if (req.headers['hx-request']) {
+        res.send(getHomeContent());
+    } else {
+        res.sendFile(path.join(__dirname, 'index.html'));
+    }
+});
+
+// HTMX Routes - these return HTML fragments for HTMX
+app.get('/home', (req, res) => {
+    res.send(getHomeContent());
+});
+
+// Posts page - handles both full page requests and HTMX requests
+app.get('/posts', (req, res) => {
+    const category = req.query.category || 'all';
+    const content = getPostsContent(category);
+    
+    // Check if this is an HTMX request
+    if (req.headers['hx-request']) {
+        res.send(content);
+    } else {
+        // Full page request - return complete HTML
+        const title = category === 'all' ? 'All Posts - CodeNPixel' : `${category} Posts - CodeNPixel`;
+        res.send(getMainHTML(content, title));
+    }
+});
+
+// Individual post page - handles both full page requests and HTMX requests
+app.get('/post/:id', (req, res) => {
+    const postId = parseInt(req.params.id);
+    const content = getPostContent(postId);
+    
+    if (!content) {
+        return res.status(404).send(getMainHTML('<h1>Post not found</h1>', 'Post Not Found - CodeNPixel'));
+    }
+
+    const post = posts.find(p => p.id === postId);
+    
+    // Check if this is an HTMX request
+    if (req.headers['hx-request']) {
+        res.send(content);
+    } else {
+        // Full page request - return complete HTML with proper title and meta
+        const title = `${post.title} - CodeNPixel`;
+        res.send(getMainHTML(content, title));
+    }
 });
 
 // API endpoint for posts (used by HTMX)
@@ -206,7 +267,7 @@ app.use((err, req, res, next) => {
 
 // 404 handler
 app.use((req, res) => {
-    res.status(404).send('<h1>Page not found</h1>');
+    res.status(404).send(getMainHTML('<h1>Page not found</h1>', 'Page Not Found - CodeNPixel'));
 });
 
 // Start server
